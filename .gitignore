@@ -1,23 +1,24 @@
-# Venv
-.banner
-.bannerpy
-.vm
-dummy.py
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
 
-# config files
+# Environments and secrets
+.venv/
 .env
+.env.*
 
-# IDEs
-.vscode
-.idea
+# Tooling caches and reports
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
 
-# Build
-BannerPy.egg-info
-build
-dist
-
-# Cashe
-__pycache__
-
-# Config files
-config.json
+# Editors and OS files
+.vscode/
+.idea/
+*.swp
+.DS_Store
