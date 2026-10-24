@@ -54,7 +54,34 @@ Register the server in your MCP client (for example GitHub Copilot CLI or Claude
 }
 ```
 
-Omit the `env` block if you have no key yet; `zenkit_connection_status` reports the configuration state either way.
+Omit the `env` block if you have no key yet; `zenkit_connection_status` reports the configuration state either way, and API-backed tools explain that `ZENKIT_API_KEY` is missing until you set it.
+
+## Tools
+
+All tools use the `zenkit_` prefix. API-backed tools read `ZENKIT_API_KEY` and `ZENKIT_API_BASE_URL` from the environment on every call, attach the key as the `Zenkit-API-Key` header, and fail with an error naming `ZENKIT_API_KEY` when no key is configured.
+
+| Tool | Parameters | Returns |
+| --- | --- | --- |
+| `zenkit_connection_status` | — | Configuration state and the effective base URL; makes no network calls. |
+| `zenkit_get_current_user` | — | The authenticated user; validates the configured key. |
+| `zenkit_list_lists` | — | Accessible lists, each with `id`, `name`, and workspace context. |
+| `zenkit_get_list` | `list_id` | A single list's details. |
+| `zenkit_list_columns` | `list_id` | The list's columns, each with `id`, `uuid`, `name`, and `data_type`. |
+| `zenkit_get_entries` | `list_id`, `filter=None`, `limit=100`, `skip=0` | Entries, each with `id`, `uuid`, and `fields`. |
+| `zenkit_get_entry` | `list_id`, `entry_id` | A single entry. |
+| `zenkit_create_entry` | `list_id`, `fields` | The created entry's `id`, `uuid`, and `fields`. |
+
+`list_id` and `entry_id` accept Zenkit's numeric and short string identifiers.
+
+Zenkit keys custom column values as `<element-uuid>_<dataType>`, for example `c0148d60-c58a-4e17-89b6-3f5cc0c0785b_text`. Entry tools return those pairs under `fields`, and `zenkit_create_entry` accepts them verbatim:
+
+```json
+{"list_id": 3639611, "fields": {"c0148d60-c58a-4e17-89b6-3f5cc0c0785b_text": "Testing API"}}
+```
+
+Use `zenkit_list_columns` to map an element's `uuid` and `data_type` to a human-readable column name.
+
+`zenkit_get_entries` passes `filter` through to Zenkit verbatim. `limit` is the maximum number of entries to return; larger values are fetched in pages of 100 internally, and `skip` offsets the first returned entry.
 
 ## Configuration
 
@@ -62,15 +89,17 @@ The server reads Zenkit configuration from environment variables:
 
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
-| `ZENKIT_API_KEY` | No (needed by future API-backed tools) | — | Zenkit API key. The scaffold never returns or logs this value. |
+| `ZENKIT_API_KEY` | Yes, for API-backed tools | — | Zenkit API key. It is sent only as the `Zenkit-API-Key` header and is never returned or logged. |
 | `ZENKIT_API_BASE_URL` | No | `https://zenkit.com/api/v1` | Base URL for the Zenkit API. Must be an absolute HTTP or HTTPS URL. |
 
-The scaffold performs no outbound network requests. The `zenkit_connection_status` tool reports whether a key is configured and which base URL is in effect, without contacting Zenkit:
+The `zenkit_connection_status` tool reports whether a key is configured and which base URL is in effect, without contacting Zenkit:
 
 ```bash
 export ZENKIT_API_KEY="your-api-key"
 uv run python -c "from tools.zenkit import zenkit_connection_status; print(zenkit_connection_status())"
 ```
+
+Every other API-backed tool sends requests to the configured base URL. A missing key, a rejected key, an unreachable service, a timeout, or a malformed response becomes a tool error with guidance instead of a traceback.
 
 > `.env` files are git-ignored but are not loaded automatically; export the variables in your shell or pass them through your MCP client's `env` block.
 
@@ -79,8 +108,9 @@ uv run python -c "from tools.zenkit import zenkit_connection_status; print(zenki
 ```
 src/server.py         create_server(), module-level mcp, CLI + transports
 src/config.py         environment settings and URL validation
+src/zenkit_api.py     ZenkitClient: auth header, error mapping, pagination
 src/tools/zenkit.py   Zenkit tools and registration
-tests/                           pytest suite (in-memory MCP client)
+tests/                           pytest suite (in-memory MCP client, mocked HTTP)
 openspec/                        specs and in-flight changes
 ```
 
@@ -94,7 +124,7 @@ uv run ruff format                   # apply formatting
 uv lock --check                      # verify lock file is current
 ```
 
-Tests run offline and do not require Zenkit credentials. Add a tool by following `AGENTS.md`.
+Tests run offline and do not require Zenkit credentials: the Zenkit HTTP client is exercised through `httpx.MockTransport` and tools through the in-memory client. Add a tool by following `AGENTS.md`.
 
 The project version lives in `VERSION`, which `pyproject.toml` reads dynamically. Before opening a pull request, use the `version-bump` skill in `.github/skills/version-bump/` to classify and commit the bump.
 
@@ -102,6 +132,9 @@ The project version lives in `VERSION`, which `pyproject.toml` reads dynamically
 
 - **`zenkit-mcp: command not found`** — run commands through `uv` (for example `uv run zenkit-mcp`) and make sure `uv sync` has completed.
 - **The MCP client cannot start the server** — use an absolute repository path in the client's `--directory` argument. Check the client's server logs (stderr) for startup errors.
+- **`ZENKIT_API_KEY` is not configured** — API-backed tools refuse to send unauthenticated requests; set the key in the environment or your MCP client's `env` block.
+- **Zenkit rejected the credentials** — the key is invalid or lacks access to the requested list; verify it in Zenkit and restart the client session.
+- **Zenkit did not respond within 30 seconds** — check network connectivity and that `ZENKIT_API_BASE_URL` points at the Zenkit API.
 - **`ZENKIT_API_BASE_URL` error** — the value must be an absolute HTTP or HTTPS URL; correct it and restart the server or client.
 - **Port already in use** — choose another port with `--port`, for example `uv run zenkit-mcp --transport http --port 9000`.
 - **Environment changes are not picked up** — configuration is read per tool call, but clients launch the server with their own environment; restart the client session after changing variables in its `env` block.
@@ -109,10 +142,11 @@ The project version lives in `VERSION`, which `pyproject.toml` reads dynamically
 
 ## Scope
 
-This repository is currently a bootstrap scaffold. The following are intentionally out of scope until later changes:
+The server covers reading Zenkit users, lists, columns, and entries, plus creating entries, through the Zenkit REST API. The following remain out of scope until later changes:
 
-- Real Zenkit API calls, pagination, and write operations
-- Authentication and OAuth flows
+- Updating, deleting, moving, or copying entries
+- Creating, renaming, or deleting lists and columns
+- OAuth flows, webhooks, retries with backoff, and response caching
 - CI pipelines and deployment automation
 
-Today it provides the server runtime, one credential-safe `zenkit_connection_status` tool, tests, linting, and documentation.
+Today it provides the server runtime, the credential-safe `zenkit_connection_status` tool, seven API-backed tools for users, lists, columns, and entries, an offline test suite, linting, and documentation.

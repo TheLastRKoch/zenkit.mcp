@@ -4,7 +4,7 @@ Guidance for coding agents and contributors working in this repository. Read `RE
 
 ## Project overview
 
-`zenkit-mcp` is a [FastMCP](https://gofastmcp.com) server that exposes Zenkit project management tools to MCP clients. It currently ships one credential-safe placeholder tool, `zenkit_connection_status`; real Zenkit API integration is planned in a later change.
+`zenkit-mcp` is a [FastMCP](https://gofastmcp.com) server that exposes Zenkit project management tools to MCP clients. It ships a credential-safe `zenkit_connection_status` tool plus API-backed tools for users, lists, columns, and entries (including entry creation), built on a shared HTTP client in `src/zenkit_api.py`.
 
 - Language: Python 3.12+
 - Framework: `fastmcp` 4.x (pinned `<5`)
@@ -35,6 +35,7 @@ Never hand-edit `uv.lock`; change dependencies with `uv add` / `uv add --dev` so
 VERSION                          single source of truth for the project version
 src/server.py         create_server(), module-level mcp, CLI + transports
 src/config.py         Settings.from_env() and URL validation
+src/zenkit_api.py     ZenkitClient: auth header, error mapping, pagination
 src/tools/zenkit.py   Zenkit tool implementations + register()
 tests/                           pytest suite using FastMCP's in-memory Client
 openspec/                        OpenSpec specs and in-flight changes
@@ -62,7 +63,7 @@ openspec/                        OpenSpec specs and in-flight changes
 
 ## Adding a tool
 
-1. Implement a typed function in `src/tools/` (one module per Zenkit area) with a docstring describing its purpose.
+1. Implement a typed function in `src/tools/` (one module per Zenkit area) with a docstring describing its purpose. API-backed tools build a `ZenkitClient` from `Settings.from_env()` inside the call and use it as an async context manager; never construct a client at import time.
 2. Register it in that module's `register(mcp)` with `mcp.add_tool(...)`.
 3. Add a test in `tests/` that calls it through FastMCP's in-memory client:
 
@@ -73,6 +74,7 @@ openspec/                        OpenSpec specs and in-flight changes
        result = await client.call_tool("zenkit_connection_status", {})
    ```
 
+   Tests must stay offline: stub HTTP with `httpx.MockTransport` (see `tests/test_zenkit_api.py` and the `zenkit` fixture in `tests/test_tools.py`).
 4. Document the tool and any new environment variables in `README.md`.
 
 ## Testing rules
@@ -98,6 +100,6 @@ openspec validate <name> --strict     # validate a change
 - Mark tasks complete in `tasks.md` only when the specified behavior is fully implemented and verified.
 - Archive a change only after implementation and review are complete.
 
-## Out of scope for the current scaffold
+## Out of scope for the current tool surface
 
-Real Zenkit API calls, authentication flows, write operations, deployment artifacts, and CI pipelines are intentionally not implemented yet. Do not add them while working on the bootstrap change.
+Entry update/delete/move/copy, list and column management (create, rename, delete), OAuth flows, webhooks, retries with backoff, response caching, deployment artifacts, and CI pipelines are intentionally not implemented yet. Do not add them without an approved OpenSpec change.
