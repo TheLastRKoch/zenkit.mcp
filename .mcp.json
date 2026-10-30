@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "zenkit": {
+      "type": "local",
+      "command": "bash",
+      "args": ["scripts/zenkit-mcp.sh"],
+      "tools": ["*"]
+    }
+  }
+}
