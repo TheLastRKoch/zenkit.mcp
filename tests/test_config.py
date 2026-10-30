@@ -42,11 +42,41 @@ def test_base_url_override_is_applied() -> None:
 
 @pytest.mark.parametrize(
     "value",
-    ["", "zenkit.com/api/v1", "ftp://zenkit.com/api/v1", "https://", "/relative/path"],
+    [
+        "",
+        "zenkit.com/api/v1",
+        "ftp://zenkit.com/api/v1",
+        "https://",
+        "/relative/path",
+        "http://zenkit.com/api/v1",
+        "http://127.0.0.1:8080/api/v1",
+        "http://localhost:8080/api/v1",
+        "HtTp://example.test/api/v1",
+    ],
 )
 def test_invalid_base_url_is_rejected(value: str) -> None:
-    with pytest.raises(SettingsError, match=API_BASE_URL_ENV_VAR):
+    with pytest.raises(SettingsError, match=API_BASE_URL_ENV_VAR) as excinfo:
         validate_api_base_url(value)
+
+    assert "https" in str(excinfo.value).lower()
+
+
+def test_rejected_base_url_is_not_echoed() -> None:
+    value = "http://user:secret@plaintext.test/api/v1"
+
+    with pytest.raises(SettingsError) as excinfo:
+        validate_api_base_url(value)
+
+    assert value not in str(excinfo.value)
+    assert "secret" not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["HTTPS://example.test/api/v1", "https://example.test/api/v1"],
+)
+def test_https_base_url_is_returned_unchanged(value: str) -> None:
+    assert validate_api_base_url(value) == value
 
 
 def test_settings_are_immutable() -> None:
