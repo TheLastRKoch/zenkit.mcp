@@ -14,7 +14,7 @@ from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
 
 from config import API_BASE_URL_ENV_VAR, API_KEY_ENV_VAR, DEFAULT_API_BASE_URL
-from tools.zenkit import register
+from tools.zenkit import _identity_result, register
 from zenkit_api import ZenkitClient
 
 TEST_API_KEY = "test-api-key"
@@ -189,6 +189,52 @@ async def test_get_current_user_rejects_invalid_credentials(
             await client.call_tool("zenkit_get_current_user", {})
 
 
+def test_identity_result_drops_credential_keys() -> None:
+    user = {
+        "id": 7,
+        "displayname": "Ada Lovelace",
+        "api_key": "leaked-key-value",
+        "session": {"refreshToken": "leaked-refresh", "token": "leaked-token"},
+        "unmapped": "dropped",
+    }
+
+    result = _identity_result(user)
+    rendered = repr(result)
+
+    assert result["id"] == 7
+    assert result["displayname"] == "Ada Lovelace"
+    assert set(result) == {"id", "displayname"}
+    assert "leaked-key-value" not in rendered
+    assert "leaked-refresh" not in rendered
+    assert "leaked-token" not in rendered
+
+
+async def test_get_current_user_omits_credentials_from_the_payload(
+    server: FastMCP, zenkit: StubZenkit
+) -> None:
+    zenkit.reply(
+        "GET",
+        "/users/me",
+        {
+            "id": 7,
+            "displayname": "Ada Lovelace",
+            "username": "ada",
+            "emails": [{"email": "ada@example.test", "verified": True}],
+            "api_key": "leaked-key-value",
+            "refreshToken": "leaked-refresh",
+        },
+    )
+
+    async with Client(server) as client:
+        result = await client.call_tool("zenkit_get_current_user", {})
+
+    assert result.data["id"] == 7
+    assert result.data["displayname"] == "Ada Lovelace"
+    assert result.data["emails"] == [{"email": "ada@example.test", "verified": True}]
+    assert "api_key" not in result.data
+    assert "refreshToken" not in result.data
+
+
 async def test_list_lists_returns_lists_with_workspace_context(
     server: FastMCP, zenkit: StubZenkit
 ) -> None:
@@ -262,6 +308,100 @@ async def test_list_columns_carry_identifier_name_and_type(
     assert column["id"] == 41102987
     assert column["name"] == "Title"
     assert column["data_type"] == "text"
+
+
+DERIVED_COLUMN_CASES = (
+    ("Text", {"text": "x", "searchText": "x", "textType": "plain"}, "text"),
+    ("Notes", {"text": "x", "searchText": "x", "textType": "html"}, "text"),
+    ("Due", {"date": 1700000000, "endDate": None, "hasTime": False, "duration": 0}, "date"),
+    ("Stage", {"categories": [], "categories_sort": []}, "categories"),
+    ("Assignee", {"persons": [], "persons_sort": []}, "persons"),
+    ("Attachment", {"files": [], "filesData": {}}, "files"),
+    ("Points", {"number": 4, "numberText": "4"}, "number"),
+    (
+        "Parent",
+        {"connected": [], "references": [], "parents": [], "path": "", "sortOrder": 1},
+        "references",
+    ),
+)
+
+
+def _element(index: int, name: str, business_data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": 5000 + index,
+        "uuid": f"{index:08x}-0000-4000-8000-000000000000",
+        "name": name,
+        "dataType": None,
+        "resourceRole": None,
+        "businessData": business_data,
+    }
+
+
+async def test_list_columns_derives_data_type_from_business_data(
+    server: FastMCP, zenkit: StubZenkit
+) -> None:
+    elements = [
+        _element(index, name, business_data)
+        for index, (name, business_data, _) in enumerate(DERIVED_COLUMN_CASES)
+    ]
+    elements.append(_element(len(elements), "Created", {}))
+    zenkit.reply("GET", "/lists/3639611/elements", elements)
+
+    async with Client(server) as client:
+        result = await client.call_tool("zenkit_list_columns", {"list_id": 3639611})
+
+    assert [column["data_type"] for column in result.data] == [
+        expected for _, _, expected in DERIVED_COLUMN_CASES
+    ] + [None]
+    assert result.data[0]["id"] == 5000
+    assert result.data[0]["uuid"] == "00000000-0000-4000-8000-000000000000"
+    assert result.data[0]["name"] == "Text"
+    assert result.data[0]["resource_role"] is None
+
+
+async def test_list_columns_prefers_a_reported_data_type(
+    server: FastMCP, zenkit: StubZenkit
+) -> None:
+    zenkit.reply(
+        "GET",
+        "/lists/3639611/elements",
+        [{"id": 1, "uuid": TITLE_ELEMENT_UUID, "name": "Title", "dataType": "text"}],
+    )
+
+    async with Client(server) as client:
+        result = await client.call_tool("zenkit_list_columns", {"list_id": 3639611})
+
+    assert result.data[0]["data_type"] == "text"
+
+
+async def test_column_data_type_matches_entry_field_key_suffix(
+    server: FastMCP, zenkit: StubZenkit
+) -> None:
+    elements = [
+        _element(index, name, business_data)
+        for index, (name, business_data, _) in enumerate(DERIVED_COLUMN_CASES)
+    ]
+    zenkit.reply("GET", "/lists/3639611/elements", elements)
+    entry_fields = {
+        f"{element['uuid']}_{expected}": None
+        for element, (_, _, expected) in zip(elements, DERIVED_COLUMN_CASES, strict=True)
+    }
+    zenkit.reply(
+        "POST",
+        "/lists/3639611/entries/filter",
+        [{"id": 1, "uuid": "entry-1", **entry_fields}],
+    )
+
+    async with Client(server) as client:
+        columns = (await client.call_tool("zenkit_list_columns", {"list_id": 3639611})).data
+        entries = (await client.call_tool("zenkit_get_entries", {"list_id": 3639611})).data
+
+    types_by_uuid = {column["uuid"]: column["data_type"] for column in columns}
+    field_keys = entries[0]["fields"]
+    assert field_keys
+    for field_key in field_keys:
+        element_uuid, _, suffix = field_key.rpartition("_")
+        assert types_by_uuid[element_uuid] == suffix
 
 
 async def test_get_entries_honors_filter_and_window(server: FastMCP, zenkit: StubZenkit) -> None:
