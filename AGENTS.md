@@ -4,7 +4,7 @@ Guidance for coding agents and contributors working in this repository. Read `RE
 
 ## Project overview
 
-`zenkit-mcp` is a [FastMCP](https://gofastmcp.com) server that exposes Zenkit project management tools to MCP clients. It ships a credential-safe `zenkit_connection_status` tool plus API-backed tools for users, lists, columns, and entries (including entry creation), built on a shared HTTP client in `src/zenkit_api.py`.
+`zenkit-mcp` is a [FastMCP](https://gofastmcp.com) server that exposes Zenkit project management tools to MCP clients. It ships a credential-safe `zenkit_connection_status` tool plus API-backed tools for users, lists, columns, and entries (including entry creation and updates), built on a shared HTTP client in `src/zenkit_api.py`.
 
 - Language: Python 3.12+
 - Framework: `fastmcp` 4.x (pinned `<5`)
@@ -38,6 +38,8 @@ src/config.py         Settings.from_env() and URL validation
 src/zenkit_api.py     ZenkitClient: auth header, error mapping, pagination
 src/tools/zenkit.py   Zenkit tool implementations + register()
 tests/                           pytest suite using FastMCP's in-memory Client
+scripts/zenkit-mcp.sh            stdio launcher used by project-level MCP config
+.mcp.json                        project-scoped MCP configuration (Copilot CLI)
 openspec/                        OpenSpec specs and in-flight changes
 .github/skills/                  project skills (mirrored in .agents/skills/)
 ```
@@ -55,6 +57,7 @@ openspec/                        OpenSpec specs and in-flight changes
 - Ruff is configured in `pyproject.toml` (`target-version = "py312"`, `line-length = 100`, rules `E`, `F`, `I`, `UP`, `B`). Run lint and format checks before finishing.
 - **Never write to stdout from project code.** In stdio mode stdout is the MCP protocol stream. Use the `logging` module, which is configured to stderr in `configure_logging()`. Do not add `print()` calls under `src/`.
 - **Secrets stay out of results and logs.** Read credentials through `Settings.from_env()`; never echo `ZENKIT_API_KEY`, its fragments, or full request headers.
+- **Never commit credentials to `.mcp.json`.** The project-scoped config launches `scripts/zenkit-mcp.sh`, which resolves `ZENKIT_API_KEY` from the environment or the user's Copilot MCP config and `exec`s the server. Keep the launcher silent on stdout and update it if the entrypoint changes.
 - Load configuration per tool invocation (`Settings.from_env()`), not at import time, so clients and tests can change environment variables without re-importing.
 - Raise `fastmcp.exceptions.ToolError` with an actionable message for expected failures. Do not leak tracebacks, internal paths, or raw exception text to clients.
 - Name tools with the `zenkit_` prefix and snake_case (for example `zenkit_connection_status`). Write a docstring; FastMCP derives the tool description from it.
@@ -102,4 +105,4 @@ openspec validate <name> --strict     # validate a change
 
 ## Out of scope for the current tool surface
 
-Entry update/delete/move/copy, list and column management (create, rename, delete), OAuth flows, webhooks, retries with backoff, response caching, deployment artifacts, and CI pipelines are intentionally not implemented yet. Do not add them without an approved OpenSpec change.
+Entry delete/move/copy, list and column management (create, rename, delete), OAuth flows, webhooks, retries with backoff, response caching, deployment artifacts, and CI pipelines are intentionally not implemented yet. Do not add them without an approved OpenSpec change.

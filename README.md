@@ -56,6 +56,21 @@ Register the server in your MCP client (for example GitHub Copilot CLI or Claude
 
 Omit the `env` block if you have no key yet; `zenkit_connection_status` reports the configuration state either way, and API-backed tools explain that `ZENKIT_API_KEY` is missing until you set it.
 
+#### Project-scoped configuration
+
+The repository ships `.mcp.json`, so clients that read project-level MCP configuration pick the server up with no setup:
+
+- **GitHub Copilot CLI** reads `.mcp.json` (or `.github/mcp.json`) from the session workspace. No per-session flags are needed; `copilot mcp list` shows `zenkit` as a workspace server.
+- **Antigravity CLI (`agy`)** only reads user-level configuration, so register the launcher once per machine:
+
+  ```bash
+  agy mcp add zenkit -- bash /absolute/path/to/zenkit.mcp/scripts/zenkit-mcp.sh
+  ```
+
+Both entries launch `scripts/zenkit-mcp.sh`, which runs `uv run zenkit-mcp` from the repository root and resolves the API key without storing it in the repository: it uses `ZENKIT_API_KEY` when exported, otherwise the key recorded for the `zenkit` server in `~/.copilot/mcp-config.json`. The key only enters the server's environment and is never printed.
+
+Because a project-level entry shadows a same-named user-level entry, the launcher performs that key lookup itself. Clients that only read user-level configuration can keep using the JSON above with an explicit `env` block.
+
 ## Tools
 
 All tools use the `zenkit_` prefix. API-backed tools read `ZENKIT_API_KEY` and `ZENKIT_API_BASE_URL` from the environment on every call, attach the key as the `Zenkit-API-Key` header, and fail with an error naming `ZENKIT_API_KEY` when no key is configured.
@@ -70,6 +85,7 @@ All tools use the `zenkit_` prefix. API-backed tools read `ZENKIT_API_KEY` and `
 | `zenkit_get_entries` | `list_id`, `filter=None`, `limit=100`, `skip=0` | Entries, each with `id`, `uuid`, and `fields`. |
 | `zenkit_get_entry` | `list_id`, `entry_id` | A single entry. |
 | `zenkit_create_entry` | `list_id`, `fields` | The created entry's `id`, `uuid`, and `fields`. |
+| `zenkit_update_entry` | `list_id`, `entry_id`, `fields` | The updated entry's `id`, `uuid`, and `fields`. |
 
 `zenkit_get_current_user` projects Zenkit's user payload onto these identity fields: `id`, `uuid`, `username`, `displayname`, `fullname`, `emails`, `imageLink`, `created_at`, `last_login`, `last_seen`, and `organizationId`. Every other upstream field is dropped, and any field whose name denotes a credential (`key`, `apiKey`/`api_key`, `token`, `secret`, or `password`) is removed recursively, so the configured API key never appears in a tool result.
 
@@ -80,6 +96,8 @@ Zenkit keys custom column values as `<element-uuid>_<dataType>`, for example `c0
 ```json
 {"list_id": 3639611, "fields": {"c0148d60-c58a-4e17-89b6-3f5cc0c0785b_text": "Testing API"}}
 ```
+
+`zenkit_update_entry` accepts the same key/value shape and sends only the supplied keys, so every other column keeps its current value; send `null` to clear one. Zenkit distinguishes date-only values from timed slots: to schedule an entry at a specific time, send the date value together with its `<element-uuid>_hasTime` flag set to `true` and its `<element-uuid>_endDate` in the same call.
 
 Use `zenkit_list_columns` to map an element's `uuid` and `data_type` to a human-readable column name. `data_type` is derived from the element definition: it is Zenkit's own type when the element reports one, otherwise the value-type key inside its `businessData` (`text`, `date`, `categories`, `persons`, `files`, `number`, `references`, `link`, or `checked`). System columns such as Created or Last Updated carry no value payload and report `null` rather than a guessed type.
 
@@ -113,6 +131,8 @@ src/config.py         environment settings and URL validation
 src/zenkit_api.py     ZenkitClient: auth header, error mapping, pagination
 src/tools/zenkit.py   Zenkit tools and registration
 tests/                           pytest suite (in-memory MCP client, mocked HTTP)
+scripts/zenkit-mcp.sh            stdio launcher used by project-level MCP config
+.mcp.json                        project-scoped MCP server configuration
 openspec/                        specs and in-flight changes
 ```
 
@@ -144,11 +164,11 @@ The project version lives in `VERSION`, which `pyproject.toml` reads dynamically
 
 ## Scope
 
-The server covers reading Zenkit users, lists, columns, and entries, plus creating entries, through the Zenkit REST API. The following remain out of scope until later changes:
+The server covers reading Zenkit users, lists, columns, and entries, plus creating and updating entries, through the Zenkit REST API. The following remain out of scope until later changes:
 
-- Updating, deleting, moving, or copying entries
+- Deleting, moving, or copying entries
 - Creating, renaming, or deleting lists and columns
 - OAuth flows, webhooks, retries with backoff, and response caching
 - CI pipelines and deployment automation
 
-Today it provides the server runtime, the credential-safe `zenkit_connection_status` tool, seven API-backed tools for users, lists, columns, and entries, an offline test suite, linting, and documentation.
+Today it provides the server runtime, the credential-safe `zenkit_connection_status` tool, eight API-backed tools for users, lists, columns, and entries, an offline test suite, linting, and documentation.

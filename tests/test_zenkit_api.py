@@ -188,3 +188,49 @@ async def test_invalid_window_parameters_are_rejected(limit: int, skip: int, fra
 async def test_empty_response_body_returns_none() -> None:
     async with make_client(lambda request: httpx.Response(204)) as client:
         assert await client.get("/users/me") is None
+
+
+async def test_update_entry_sends_fields_to_the_entry_resource() -> None:
+    seen: list[httpx.Request] = []
+    updated = {
+        "id": 1204,
+        "uuid": "entry-uuid",
+        "c0148d60-c58a-4e17-89b6-3f5cc0c0785b_text": "Done",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=updated)
+
+    fields = {"c0148d60-c58a-4e17-89b6-3f5cc0c0785b_text": "Done"}
+
+    async with make_client(handler) as client:
+        payload = await client.update_entry("3931055", 1204, fields)
+
+    assert payload == updated
+    assert len(seen) == 1
+    assert seen[0].method == "PUT"
+    assert str(seen[0].url) == f"{BASE_URL}/lists/3931055/entries/1204"
+    assert json.loads(seen[0].content) == fields
+
+
+async def test_update_entry_reports_missing_resource() -> None:
+    async with make_client(lambda request: httpx.Response(404, json={})) as client:
+        with pytest.raises(ToolError, match="does not exist"):
+            await client.update_entry(3931055, 999999, {"a_text": "x"})
+
+
+async def test_update_entry_rejected_credentials_name_the_api_key_variable() -> None:
+    async with make_client(lambda request: httpx.Response(401, json={})) as client:
+        with pytest.raises(ToolError, match=API_KEY_ENV_VAR) as excinfo:
+            await client.update_entry(3931055, 1204, {"a_text": "x"})
+
+    assert "HTTP 401" in str(excinfo.value)
+    assert API_KEY not in str(excinfo.value)
+
+
+@pytest.mark.parametrize("status", [400, 422, 500])
+async def test_update_entry_error_status_becomes_tool_error(status: int) -> None:
+    async with make_client(lambda request: httpx.Response(status, json={})) as client:
+        with pytest.raises(ToolError, match=f"HTTP {status}"):
+            await client.update_entry(3931055, 1204, {"a_text": "x"})

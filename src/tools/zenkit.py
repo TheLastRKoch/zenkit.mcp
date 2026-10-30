@@ -229,6 +229,30 @@ async def zenkit_create_entry(list_id: int | str, fields: dict[str, Any]) -> dic
     return _entry_result(entry)
 
 
+async def zenkit_update_entry(
+    list_id: int | str,
+    entry_id: int | str,
+    fields: dict[str, Any],
+) -> dict[str, Any]:
+    """Update custom column values on an existing entry and return the updated entry.
+
+    ``fields`` maps custom column keys of the form ``<element-uuid>_<dataType>`` to values,
+    for example ``{"c0148d60-c58a-4e17-89b6-3f5cc0c0785b_text": "Testing API"}``. Only the
+    supplied keys are sent; send ``null`` to clear a value. To schedule a timed slot, send
+    the date value together with its ``<element-uuid>_hasTime`` flag set to true and its
+    ``<element-uuid>_endDate``. Use zenkit_list_columns to discover an element's uuid and
+    data type.
+    """
+    if not fields:
+        raise ToolError("fields must contain at least one custom column value.")
+
+    async with ZenkitClient.from_env() as client:
+        payload = await client.update_entry(list_id, entry_id, fields)
+
+    entry = _expect(payload, dict, f"entry {entry_id} in list {list_id}")
+    return _entry_result(entry)
+
+
 def register(mcp: FastMCP) -> None:
     """Register all Zenkit tools on ``mcp``."""
     mcp.add_tool(zenkit_connection_status)
@@ -239,3 +263,4 @@ def register(mcp: FastMCP) -> None:
     mcp.add_tool(zenkit_get_entries)
     mcp.add_tool(zenkit_get_entry)
     mcp.add_tool(zenkit_create_entry)
+    mcp.add_tool(zenkit_update_entry)

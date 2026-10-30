@@ -29,6 +29,7 @@ NEW_TOOL_NAMES = (
     "zenkit_get_entries",
     "zenkit_get_entry",
     "zenkit_create_entry",
+    "zenkit_update_entry",
 )
 
 
@@ -484,6 +485,52 @@ async def test_create_entry_posts_documented_body(server: FastMCP, zenkit: StubZ
     assert result.data["id"] == 999
 
 
+async def test_update_entry_puts_fields_and_returns_projected_entry(
+    server: FastMCP, zenkit: StubZenkit
+) -> None:
+    fields = {TITLE_FIELD_KEY: "Renamed"}
+    zenkit.reply(
+        "PUT",
+        "/lists/3639611/entries/42",
+        {"id": 42, "uuid": "entry-uuid", "created_at": "2026-10-30T00:00:00.000Z", **fields},
+    )
+
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "zenkit_update_entry", {"list_id": 3639611, "entry_id": 42, "fields": fields}
+        )
+
+    assert zenkit.bodies("PUT", "/lists/3639611/entries/42") == [fields]
+    assert result.data == {"id": 42, "uuid": "entry-uuid", "fields": fields}
+
+
+async def test_update_entry_rejects_an_empty_field_mapping(
+    server: FastMCP, zenkit: StubZenkit
+) -> None:
+    async with Client(server) as client:
+        with pytest.raises(ToolError, match="at least one"):
+            await client.call_tool(
+                "zenkit_update_entry", {"list_id": 3639611, "entry_id": 42, "fields": {}}
+            )
+
+    assert zenkit.requests == []
+
+
+async def test_update_entry_requires_a_configured_api_key(
+    server: FastMCP, zenkit: StubZenkit, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv(API_KEY_ENV_VAR, raising=False)
+
+    async with Client(server) as client:
+        with pytest.raises(ToolError, match=API_KEY_ENV_VAR):
+            await client.call_tool(
+                "zenkit_update_entry",
+                {"list_id": 3639611, "entry_id": 42, "fields": {TITLE_FIELD_KEY: "x"}},
+            )
+
+    assert zenkit.requests == []
+
+
 async def test_tool_results_and_logs_never_expose_the_api_key(
     server: FastMCP, zenkit: StubZenkit, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -508,6 +555,7 @@ async def test_tool_results_and_logs_never_expose_the_api_key(
         ("zenkit_get_entries", {"list_id": 1}),
         ("zenkit_get_entry", {"list_id": 1, "entry_id": 2}),
         ("zenkit_create_entry", {"list_id": 1, "fields": {}}),
+        ("zenkit_update_entry", {"list_id": 1, "entry_id": 2, "fields": {"a_text": "x"}}),
     ],
 )
 async def test_api_tools_require_a_configured_api_key(
@@ -536,4 +584,14 @@ async def test_api_tools_are_discoverable(server: FastMCP) -> None:
         "skip",
     }
     assert set(tools["zenkit_create_entry"].input_schema["properties"]) == {"list_id", "fields"}
+    assert set(tools["zenkit_update_entry"].input_schema["properties"]) == {
+        "list_id",
+        "entry_id",
+        "fields",
+    }
     assert tools["zenkit_get_entry"].input_schema["required"] == ["list_id", "entry_id"]
+    assert tools["zenkit_update_entry"].input_schema["required"] == [
+        "list_id",
+        "entry_id",
+        "fields",
+    ]

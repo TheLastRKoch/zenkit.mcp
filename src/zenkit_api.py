@@ -81,6 +81,15 @@ class ZenkitClient:
         """Send a POST request with a JSON body and return the decoded JSON payload."""
         return await self._request("POST", path, json=json)
 
+    async def update_entry(
+        self,
+        list_id: int | str,
+        entry_id: int | str,
+        fields: Mapping[str, Any],
+    ) -> Any:
+        """Send the supplied column values to an entry and return the updated payload."""
+        return await self._request("PUT", f"/lists/{list_id}/entries/{entry_id}", json=dict(fields))
+
     async def list_entries(
         self,
         list_id: int | str,
