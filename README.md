@@ -63,13 +63,15 @@ All tools use the `zenkit_` prefix. API-backed tools read `ZENKIT_API_KEY` and `
 | Tool | Parameters | Returns |
 | --- | --- | --- |
 | `zenkit_connection_status` | — | Configuration state and the effective base URL; makes no network calls. |
-| `zenkit_get_current_user` | — | The authenticated user; validates the configured key. |
+| `zenkit_get_current_user` | — | The authenticated user's identity; validates the configured key. |
 | `zenkit_list_lists` | — | Accessible lists, each with `id`, `name`, and workspace context. |
 | `zenkit_get_list` | `list_id` | A single list's details. |
-| `zenkit_list_columns` | `list_id` | The list's columns, each with `id`, `uuid`, `name`, and `data_type`. |
+| `zenkit_list_columns` | `list_id` | The list's columns, each with `id`, `uuid`, `name`, `data_type`, and `resource_role`. |
 | `zenkit_get_entries` | `list_id`, `filter=None`, `limit=100`, `skip=0` | Entries, each with `id`, `uuid`, and `fields`. |
 | `zenkit_get_entry` | `list_id`, `entry_id` | A single entry. |
 | `zenkit_create_entry` | `list_id`, `fields` | The created entry's `id`, `uuid`, and `fields`. |
+
+`zenkit_get_current_user` projects Zenkit's user payload onto these identity fields: `id`, `uuid`, `username`, `displayname`, `fullname`, `emails`, `imageLink`, `created_at`, `last_login`, `last_seen`, and `organizationId`. Every other upstream field is dropped, and any field whose name denotes a credential (`key`, `apiKey`/`api_key`, `token`, `secret`, or `password`) is removed recursively, so the configured API key never appears in a tool result.
 
 `list_id` and `entry_id` accept Zenkit's numeric and short string identifiers.
 
@@ -79,7 +81,7 @@ Zenkit keys custom column values as `<element-uuid>_<dataType>`, for example `c0
 {"list_id": 3639611, "fields": {"c0148d60-c58a-4e17-89b6-3f5cc0c0785b_text": "Testing API"}}
 ```
 
-Use `zenkit_list_columns` to map an element's `uuid` and `data_type` to a human-readable column name.
+Use `zenkit_list_columns` to map an element's `uuid` and `data_type` to a human-readable column name. `data_type` is derived from the element definition: it is Zenkit's own type when the element reports one, otherwise the value-type key inside its `businessData` (`text`, `date`, `categories`, `persons`, `files`, `number`, `references`, `link`, or `checked`). System columns such as Created or Last Updated carry no value payload and report `null` rather than a guessed type.
 
 `zenkit_get_entries` passes `filter` through to Zenkit verbatim. `limit` is the maximum number of entries to return; larger values are fetched in pages of 100 internally, and `skip` offsets the first returned entry.
 

@@ -16,6 +16,83 @@ _ENTRY_FIELD_KEY = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}_\w+$"
 )
 
+_IDENTITY_FIELDS = (
+    "id",
+    "uuid",
+    "username",
+    "displayname",
+    "fullname",
+    "emails",
+    "imageLink",
+    "created_at",
+    "last_login",
+    "last_seen",
+    "organizationId",
+)
+
+_CREDENTIAL_KEY_NAMES = frozenset({"key", "apikey", "api_key", "token", "secret", "password"})
+
+_COLUMN_TYPE_PRECEDENCE = (
+    "text",
+    "date",
+    "categories",
+    "persons",
+    "files",
+    "number",
+    "references",
+    "link",
+    "checked",
+)
+
+
+def _normalized_key_name(name: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _is_credential_key(name: str) -> bool:
+    return (
+        name.lower() in _CREDENTIAL_KEY_NAMES or _normalized_key_name(name) in _CREDENTIAL_KEY_NAMES
+    )
+
+
+def _redact_credentials(value: Any) -> Any:
+    """Recursively drop mapping keys whose name denotes a credential."""
+    if isinstance(value, Mapping):
+        return {
+            key: _redact_credentials(item)
+            for key, item in value.items()
+            if not isinstance(key, str) or not _is_credential_key(key)
+        }
+    if isinstance(value, list):
+        return [_redact_credentials(item) for item in value]
+    return value
+
+
+def _identity_result(user: Mapping[str, Any]) -> dict[str, Any]:
+    """Project a Zenkit user payload onto the documented identity fields.
+
+    The allowlist fails closed: unknown or future upstream fields, including credential-bearing
+    ones such as ``api_key``, are dropped and the projected value is scrubbed again for safety.
+    """
+    projected = {name: user[name] for name in _IDENTITY_FIELDS if name in user}
+    return _redact_credentials(projected)
+
+
+def _column_data_type(element: Mapping[str, Any]) -> str | None:
+    """Return the element's data type, deriving it from ``businessData`` when Zenkit omits it."""
+    data_type = element.get("dataType")
+    if isinstance(data_type, str) and data_type.strip():
+        return data_type
+
+    business_data = element.get("businessData")
+    if not isinstance(business_data, Mapping):
+        return None
+
+    for candidate in _COLUMN_TYPE_PRECEDENCE:
+        if candidate in business_data:
+            return candidate
+    return None
+
 
 def zenkit_connection_status() -> dict[str, Any]:
     """Report whether Zenkit credentials are configured, without calling the Zenkit API."""
@@ -58,7 +135,8 @@ async def zenkit_get_current_user() -> dict[str, Any]:
     """Return the authenticated Zenkit user, validating the configured API key."""
     async with ZenkitClient.from_env() as client:
         payload = await client.get("/users/me")
-    return _expect(payload, dict, "the authenticated user")
+    user = _expect(payload, dict, "the authenticated user")
+    return _identity_result(user)
 
 
 async def zenkit_list_lists() -> list[dict[str, Any]]:
@@ -103,7 +181,7 @@ async def zenkit_list_columns(list_id: int | str) -> list[dict[str, Any]]:
             "id": element.get("id"),
             "uuid": element.get("uuid"),
             "name": element.get("name"),
-            "data_type": element.get("dataType"),
+            "data_type": _column_data_type(element),
             "resource_role": element.get("resourceRole"),
         }
         for element in elements
