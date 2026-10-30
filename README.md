@@ -92,7 +92,7 @@ The server reads Zenkit configuration from environment variables:
 | Variable | Required | Default | Purpose |
 | --- | --- | --- | --- |
 | `ZENKIT_API_KEY` | Yes, for API-backed tools | — | Zenkit API key. It is sent only as the `Zenkit-API-Key` header and is never returned or logged. |
-| `ZENKIT_API_BASE_URL` | No | `https://zenkit.com/api/v1` | Base URL for the Zenkit API. Must be an absolute HTTP or HTTPS URL. |
+| `ZENKIT_API_BASE_URL` | No | `https://zenkit.com/api/v1` | Base URL for the Zenkit API. Must be an absolute HTTPS URL; plaintext URLs are rejected so the API key is never sent unencrypted. |
 
 The `zenkit_connection_status` tool reports whether a key is configured and which base URL is in effect, without contacting Zenkit:
 
@@ -137,7 +137,7 @@ The project version lives in `VERSION`, which `pyproject.toml` reads dynamically
 - **`ZENKIT_API_KEY` is not configured** — API-backed tools refuse to send unauthenticated requests; set the key in the environment or your MCP client's `env` block.
 - **Zenkit rejected the credentials** — the key is invalid or lacks access to the requested list; verify it in Zenkit and restart the client session.
 - **Zenkit did not respond within 30 seconds** — check network connectivity and that `ZENKIT_API_BASE_URL` points at the Zenkit API.
-- **`ZENKIT_API_BASE_URL` error** — the value must be an absolute HTTP or HTTPS URL; correct it and restart the server or client.
+- **`ZENKIT_API_BASE_URL` error** — the value must be an absolute HTTPS URL; correct it and restart the server or client.
 - **Port already in use** — choose another port with `--port`, for example `uv run zenkit-mcp --transport http --port 9000`.
 - **Environment changes are not picked up** — configuration is read per tool call, but clients launch the server with their own environment; restart the client session after changing variables in its `env` block.
 - **Streamable HTTP does not respond** — confirm the server is bound to the expected host/port and start it with `--transport http`; the default transport is stdio.

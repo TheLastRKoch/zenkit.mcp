@@ -136,6 +136,18 @@ async def test_malformed_base_url_raises_tool_error(
             await client.call_tool("zenkit_connection_status", {})
 
 
+async def test_plaintext_base_url_raises_tool_error(
+    server: FastMCP, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv(API_BASE_URL_ENV_VAR, "http://example.test/api/v1")
+
+    async with Client(server) as client:
+        with pytest.raises(ToolError, match=API_BASE_URL_ENV_VAR) as excinfo:
+            await client.call_tool("zenkit_connection_status", {})
+
+    assert "https" in str(excinfo.value).lower()
+
+
 async def test_api_key_is_never_exposed(
     server: FastMCP, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:

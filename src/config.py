@@ -38,11 +38,15 @@ class Settings:
 
 
 def validate_api_base_url(value: str) -> str:
-    """Return ``value`` unchanged when it is an absolute HTTP(S) URL, else raise."""
+    """Return ``value`` unchanged when it is an absolute HTTPS URL, else raise.
+
+    Only ``https`` is accepted so the ``Zenkit-API-Key`` header is never sent over a plaintext
+    connection. The rejected value is not included in the error.
+    """
     parts = urlsplit(value)
-    if parts.scheme not in {"http", "https"} or not parts.hostname:
+    if parts.scheme.lower() != "https" or not parts.hostname:
         raise SettingsError(
-            f"{API_BASE_URL_ENV_VAR} must be an absolute HTTP or HTTPS URL "
+            f"{API_BASE_URL_ENV_VAR} must be an absolute HTTPS URL "
             f"(for example {DEFAULT_API_BASE_URL})."
         )
     return value
