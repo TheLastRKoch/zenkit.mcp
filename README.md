@@ -29,6 +29,17 @@ To serve Streamable HTTP instead (useful for inspecting with `curl` or a browser
 uv run zenkit-mcp --transport http --host 127.0.0.1 --port 8000
 ```
 
+HTTP mode binds `127.0.0.1:8000` by default and serves the MCP endpoint at `/mcp`. Binding a non-loopback
+address without `ZENKIT_MCP_AUTH_TOKEN` is refused, because anyone who can reach the port would otherwise be
+able to read and modify your Zenkit data. Generate a token and require it:
+
+```bash
+export ZENKIT_MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+uv run zenkit-mcp --transport http --host 0.0.0.0 --port 9010
+```
+
+Clients then send `Authorization: Bearer <token>` with every request.
+
 Use `uv run zenkit-mcp --help` to see all options. In stdio mode, logs go to stderr and stdout carries only MCP protocol messages, so the server can be safely launched by a client.
 
 ### MCP client configuration
@@ -71,6 +82,64 @@ Both entries launch `scripts/zenkit-mcp.sh`, which runs `uv run zenkit-mcp` from
 
 Because a project-level entry shadows a same-named user-level entry, the launcher performs that key lookup itself. Clients that only read user-level configuration can keep using the JSON above with an explicit `env` block.
 
+## Running in Docker
+
+Build the image from the repository root:
+
+```bash
+docker build -t zenkit-mcp .
+```
+
+Run it with both credentials and publish the HTTP port:
+
+```bash
+export ZENKIT_API_KEY="your-api-key"
+export ZENKIT_MCP_AUTH_TOKEN="$(openssl rand -hex 32)"
+docker run -d --name zenkit-mcp -p 9010:9010 \
+  -e ZENKIT_API_KEY -e ZENKIT_MCP_AUTH_TOKEN zenkit-mcp
+```
+
+The container listens on `0.0.0.0:9010` and serves MCP at `http://<docker-host>:9010/mcp`; clients must send `Authorization: Bearer <token>`. The image runs as an unprivileged user and stores no credentials — both values are read from the environment at runtime.
+
+`-p 9010:9010` publishes the port on every host interface, and on Linux published ports bypass host firewall rules such as `ufw`. Publish to loopback instead (`-p 127.0.0.1:9010:9010`) when only local clients need access, or restrict the port at the firewall. The bearer token is the only thing separating a reachable port from your Zenkit data.
+
+`docker-compose.yml` wraps the same container with the required variables, a healthcheck, and a restart policy; see [Docker Compose](#docker-compose).
+
+### Docker Compose
+
+`docker-compose.yml` runs the image with the required credentials, a healthcheck, and a restart policy. Provide the variables in the shell or in a `.env` file beside the compose file — Compose loads `.env` automatically, the server itself does not, and the file is git-ignored:
+
+```bash
+ZENKIT_API_KEY=your-api-key
+ZENKIT_MCP_AUTH_TOKEN=<output of: openssl rand -hex 32>
+```
+
+```bash
+docker compose up -d
+docker compose ps
+docker compose down
+```
+
+Compose refuses to create the container when either variable is missing, so an anonymous deployment cannot happen by accident. Because the service publishes `9010:9010`, the port is reachable from your network: restrict it at the firewall, or change the mapping to `127.0.0.1:9010:9010` when the client runs on the same host.
+
+#### MCP clients over HTTP
+
+n8n's **MCP Client Tool** node: set the endpoint to `http://<docker-host>:9010/mcp`, select Bearer (or header) authentication, and use the value of `ZENKIT_MCP_AUTH_TOKEN`. When n8n also runs in Docker, put both containers on one network and reach the server by its container or service name (`http://zenkit-mcp:9010/mcp`); `host.docker.internal` only resolves on Docker Desktop, or on Linux when the n8n container declares `extra_hosts: ["host.docker.internal:host-gateway"]`.
+
+VS Code (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "zenkit": {
+      "type": "http",
+      "url": "http://127.0.0.1:9010/mcp",
+      "headers": { "Authorization": "Bearer <token>" }
+    }
+  }
+}
+```
+
 ## Tools
 
 All tools use the `zenkit_` prefix. API-backed tools read `ZENKIT_API_KEY` and `ZENKIT_API_BASE_URL` from the environment on every call, attach the key as the `Zenkit-API-Key` header, and fail with an error naming `ZENKIT_API_KEY` when no key is configured.
@@ -111,6 +180,7 @@ The server reads Zenkit configuration from environment variables:
 | --- | --- | --- | --- |
 | `ZENKIT_API_KEY` | Yes, for API-backed tools | — | Zenkit API key. It is sent only as the `Zenkit-API-Key` header and is never returned or logged. |
 | `ZENKIT_API_BASE_URL` | No | `https://zenkit.com/api/v1` | Base URL for the Zenkit API. Must be an absolute HTTPS URL; plaintext URLs are rejected so the API key is never sent unencrypted. |
+| `ZENKIT_MCP_AUTH_TOKEN` | Yes, for HTTP on a non-loopback host | — | Bearer token that clients must send to the Streamable HTTP endpoint. It is never logged or returned. |
 
 The `zenkit_connection_status` tool reports whether a key is configured and which base URL is in effect, without contacting Zenkit:
 
@@ -161,6 +231,8 @@ The project version lives in `VERSION`, which `pyproject.toml` reads dynamically
 - **Port already in use** — choose another port with `--port`, for example `uv run zenkit-mcp --transport http --port 9000`.
 - **Environment changes are not picked up** — configuration is read per tool call, but clients launch the server with their own environment; restart the client session after changing variables in its `env` block.
 - **Streamable HTTP does not respond** — confirm the server is bound to the expected host/port and start it with `--transport http`; the default transport is stdio.
+- **HTTP requests return `401`** — the client is not sending the configured bearer token; send `Authorization: Bearer <token>` using the same value as `ZENKIT_MCP_AUTH_TOKEN`.
+- **`Refusing to serve HTTP` on startup** — a non-loopback host was selected without `ZENKIT_MCP_AUTH_TOKEN`; set the token or bind `127.0.0.1`.
 
 ## Scope
 
@@ -169,6 +241,6 @@ The server covers reading Zenkit users, lists, columns, and entries, plus creati
 - Deleting, moving, or copying entries
 - Creating, renaming, or deleting lists and columns
 - OAuth flows, webhooks, retries with backoff, and response caching
-- CI pipelines and deployment automation
+- CI pipelines and registry publishing (building and running the container is covered in [Running in Docker](#running-in-docker))
 
-Today it provides the server runtime, the credential-safe `zenkit_connection_status` tool, eight API-backed tools for users, lists, columns, and entries, an offline test suite, linting, and documentation.
+Today it provides the server runtime with optional bearer-token authentication for HTTP, a container deployment, the credential-safe `zenkit_connection_status` tool, eight API-backed tools for users, lists, columns, and entries, an offline test suite, linting, and documentation.

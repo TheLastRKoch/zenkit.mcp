@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 DEFAULT_API_BASE_URL = "https://zenkit.com/api/v1"
 API_KEY_ENV_VAR = "ZENKIT_API_KEY"
 API_BASE_URL_ENV_VAR = "ZENKIT_API_BASE_URL"
+AUTH_TOKEN_ENV_VAR = "ZENKIT_MCP_AUTH_TOKEN"
 
 
 class SettingsError(ValueError):
@@ -35,6 +36,29 @@ class Settings:
         api_key = env.get(API_KEY_ENV_VAR, "").strip() or None
         api_base_url = env.get(API_BASE_URL_ENV_VAR, "").strip() or DEFAULT_API_BASE_URL
         return cls(api_key=api_key, api_base_url=validate_api_base_url(api_base_url))
+
+
+@dataclass(frozen=True)
+class HttpAuthSettings:
+    """Client authentication settings for the Streamable HTTP transport.
+
+    The token is excluded from the representation so that logging a settings object never
+    reveals it.
+    """
+
+    token: str | None = field(default=None, repr=False)
+
+    @property
+    def configured(self) -> bool:
+        """Whether clients must present a bearer token."""
+        return self.token is not None
+
+    @classmethod
+    def from_env(cls, environ: Mapping[str, str] | None = None) -> HttpAuthSettings:
+        """Build settings from ``ZENKIT_MCP_AUTH_TOKEN``, treating blank values as absent."""
+        env = os.environ if environ is None else environ
+        token = env.get(AUTH_TOKEN_ENV_VAR, "").strip() or None
+        return cls(token=token)
 
 
 def validate_api_base_url(value: str) -> str:

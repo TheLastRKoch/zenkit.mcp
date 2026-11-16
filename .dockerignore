@@ -1,0 +1,24 @@
+# Keep the build context limited to what the image needs, and keep local
+# credentials, virtual environments, and repository metadata out of layers.
+
+.git
+.github
+.agents
+.venv
+.env
+.pytest_cache
+.ruff_cache
+__pycache__
+*.py[cod]
+*.egg-info
+build
+dist
+
+tests
+openspec
+scripts
+.mcp.json
+
+Dockerfile
+docker-compose.yml
+.dockerignore
