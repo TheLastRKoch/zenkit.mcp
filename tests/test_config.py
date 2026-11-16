@@ -5,7 +5,9 @@ import pytest
 from config import (
     API_BASE_URL_ENV_VAR,
     API_KEY_ENV_VAR,
+    AUTH_TOKEN_ENV_VAR,
     DEFAULT_API_BASE_URL,
+    HttpAuthSettings,
     Settings,
     SettingsError,
     validate_api_base_url,
@@ -32,6 +34,34 @@ def test_blank_api_key_is_treated_as_absent() -> None:
 
     assert settings.api_key is None
     assert settings.configured is False
+
+
+def test_http_auth_defaults_to_disabled() -> None:
+    settings = HttpAuthSettings.from_env({})
+
+    assert settings.token is None
+    assert settings.configured is False
+
+
+def test_http_auth_token_is_read_from_environment() -> None:
+    settings = HttpAuthSettings.from_env({AUTH_TOKEN_ENV_VAR: "client-token"})
+
+    assert settings.token == "client-token"
+    assert settings.configured is True
+
+
+def test_blank_http_auth_token_is_treated_as_absent() -> None:
+    settings = HttpAuthSettings.from_env({AUTH_TOKEN_ENV_VAR: "   "})
+
+    assert settings.token is None
+    assert settings.configured is False
+
+
+def test_http_auth_token_is_absent_from_representation() -> None:
+    settings = HttpAuthSettings.from_env({AUTH_TOKEN_ENV_VAR: "super-secret-token"})
+
+    assert "super-secret-token" not in repr(settings)
+    assert "super-secret-token" not in str(settings)
 
 
 def test_base_url_override_is_applied() -> None:

@@ -4,13 +4,18 @@ from importlib.metadata import version
 
 import pytest
 from fastmcp import Client
+from starlette.testclient import TestClient
 
+from config import AUTH_TOKEN_ENV_VAR, HttpAuthSettings
 from server import (
     DEFAULT_HOST,
     DEFAULT_PORT,
     SERVER_NAME,
+    build_auth_provider,
     build_parser,
     create_server,
+    ensure_http_auth_configured,
+    is_loopback_host,
 )
 
 
@@ -52,3 +57,63 @@ def test_parser_rejects_invalid_options(argv: list[str]) -> None:
         build_parser().parse_args(argv)
 
     assert excinfo.value.code == 2
+
+
+def test_server_without_auth_setting_is_unauthenticated() -> None:
+    assert create_server().auth is None
+    assert build_auth_provider(HttpAuthSettings()) is None
+
+
+def test_auth_provider_is_built_from_configured_token() -> None:
+    assert build_auth_provider(HttpAuthSettings(token="client-token")) is not None
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "127.0.0.5", "::1", "localhost", "LOCALHOST"])
+def test_loopback_hosts_are_recognized(host: str) -> None:
+    assert is_loopback_host(host)
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "::", "192.168.1.10", "zenkit-mcp", ""])
+def test_non_loopback_hosts_are_not_recognized(host: str) -> None:
+    assert not is_loopback_host(host)
+
+
+def test_loopback_http_without_token_is_allowed() -> None:
+    ensure_http_auth_configured("127.0.0.1", HttpAuthSettings())
+
+
+def test_non_loopback_http_with_token_is_allowed() -> None:
+    ensure_http_auth_configured("0.0.0.0", HttpAuthSettings(token="client-token"))
+
+
+def test_non_loopback_http_without_token_is_refused(caplog: pytest.LogCaptureFixture) -> None:
+    with pytest.raises(SystemExit) as excinfo:
+        ensure_http_auth_configured("0.0.0.0", HttpAuthSettings())
+
+    assert excinfo.value.code == 2
+    assert AUTH_TOKEN_ENV_VAR in caplog.text
+
+
+def test_http_endpoint_requires_the_configured_bearer_token() -> None:
+    token = "client-token"
+    server = create_server(build_auth_provider(HttpAuthSettings(token=token)))
+    initialize = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1"},
+        },
+    }
+    headers = {"Accept": "application/json, text/event-stream"}
+
+    with TestClient(server.http_app()) as http_client:
+        unauthenticated = http_client.post("/mcp", json=initialize, headers=headers)
+        authenticated = http_client.post(
+            "/mcp", json=initialize, headers={**headers, "Authorization": f"Bearer {token}"}
+        )
+
+    assert unauthenticated.status_code == 401
+    assert authenticated.status_code != 401

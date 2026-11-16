@@ -1,0 +1,20 @@
+services:
+  zenkit-mcp:
+    build: .
+    image: zenkit-mcp:latest
+    ports:
+      - "9010:9010"
+    environment:
+      ZENKIT_API_KEY: ${ZENKIT_API_KEY:?ZENKIT_API_KEY must be set}
+      ZENKIT_MCP_AUTH_TOKEN: ${ZENKIT_MCP_AUTH_TOKEN:?ZENKIT_MCP_AUTH_TOKEN must be set}
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import socket; socket.create_connection(('127.0.0.1', 9010), 5).close()"
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

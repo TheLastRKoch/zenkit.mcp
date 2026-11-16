@@ -33,13 +33,15 @@ Never hand-edit `uv.lock`; change dependencies with `uv add` / `uv add --dev` so
 
 ```
 VERSION                          single source of truth for the project version
-src/server.py         create_server(), module-level mcp, CLI + transports
-src/config.py         Settings.from_env() and URL validation
+src/server.py         create_server(), HTTP bearer auth, CLI + transports
+src/config.py         Settings/HttpAuthSettings.from_env() and URL validation
 src/zenkit_api.py     ZenkitClient: auth header, error mapping, pagination
 src/tools/zenkit.py   Zenkit tool implementations + register()
 tests/                           pytest suite using FastMCP's in-memory Client
 scripts/zenkit-mcp.sh            stdio launcher used by project-level MCP config
 .mcp.json                        project-scoped MCP configuration (Copilot CLI)
+Dockerfile                       multi-stage image; HTTP on 0.0.0.0:9010
+docker-compose.yml               compose deployment with required credentials
 openspec/                        OpenSpec specs and in-flight changes
 .github/skills/                  project skills (mirrored in .agents/skills/)
 ```
@@ -105,4 +107,4 @@ openspec validate <name> --strict     # validate a change
 
 ## Out of scope for the current tool surface
 
-Entry delete/move/copy, list and column management (create, rename, delete), OAuth flows, webhooks, retries with backoff, response caching, deployment artifacts, and CI pipelines are intentionally not implemented yet. Do not add them without an approved OpenSpec change.
+Entry delete/move/copy, list and column management (create, rename, delete), OAuth flows, webhooks, retries with backoff, response caching, and CI pipelines are intentionally not implemented yet. Container deployment through `Dockerfile` and `docker-compose.yml` is supported. Do not add the rest without an approved OpenSpec change.

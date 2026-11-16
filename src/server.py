@@ -3,14 +3,20 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import logging
 import sys
 from collections.abc import Sequence
 from importlib.metadata import PackageNotFoundError, version
+from typing import TYPE_CHECKING
 
 from fastmcp import FastMCP
 
+from config import AUTH_TOKEN_ENV_VAR, HttpAuthSettings
 from tools import zenkit
+
+if TYPE_CHECKING:
+    from fastmcp.server.auth import AuthProvider
 
 PACKAGE_NAME = "zenkit-mcp"
 SERVER_NAME = "zenkit-mcp"
@@ -34,15 +40,51 @@ def package_version() -> str:
         return "0.0.0"
 
 
-def create_server() -> FastMCP:
+def create_server(auth: AuthProvider | None = None) -> FastMCP:
     """Build the Zenkit MCP server with all tools registered."""
     server = FastMCP(
         name=SERVER_NAME,
         version=package_version(),
         instructions=SERVER_INSTRUCTIONS,
+        auth=auth,
     )
     zenkit.register(server)
     return server
+
+
+def build_auth_provider(auth_settings: HttpAuthSettings) -> AuthProvider | None:
+    """Return a bearer-token auth provider, or ``None`` when no token is configured."""
+    if auth_settings.token is None:
+        return None
+    # Imported lazily: the auth providers pull in heavy optional dependencies that
+    # stdio deployments never need.
+    from fastmcp.server.auth.providers.jwt import StaticTokenVerifier
+
+    return StaticTokenVerifier(tokens={auth_settings.token: {"client_id": SERVER_NAME}})
+
+
+def is_loopback_host(host: str) -> bool:
+    """Whether ``host`` only accepts connections from the same machine."""
+    candidate = host.strip().lower()
+    if candidate == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(candidate).is_loopback
+    except ValueError:
+        return False
+
+
+def ensure_http_auth_configured(host: str, auth_settings: HttpAuthSettings) -> None:
+    """Refuse to expose the HTTP transport on a reachable address without a token."""
+    if auth_settings.configured or is_loopback_host(host):
+        return
+    logger.error(
+        "Refusing to serve HTTP on %s: set %s to the token clients must send, "
+        "or bind to 127.0.0.1.",
+        host,
+        AUTH_TOKEN_ENV_VAR,
+    )
+    raise SystemExit(2)
 
 
 mcp = create_server()
@@ -100,12 +142,20 @@ def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     configure_logging()
 
+    auth_settings = HttpAuthSettings.from_env()
     if args.transport == "http":
+        ensure_http_auth_configured(args.host, auth_settings)
         logger.info("Starting %s over Streamable HTTP on %s:%s", SERVER_NAME, args.host, args.port)
-        mcp.run(transport="http", host=args.host, port=args.port, show_banner=False)
+        if auth_settings.configured:
+            logger.info("Client authentication is required via %s", AUTH_TOKEN_ENV_VAR)
+        else:
+            logger.info("No client authentication configured; %s is loopback only", args.host)
+        create_server(build_auth_provider(auth_settings)).run(
+            transport="http", host=args.host, port=args.port, show_banner=False
+        )
     else:
         logger.info("Starting %s over stdio", SERVER_NAME)
-        mcp.run(show_banner=False)
+        create_server().run(show_banner=False)
 
 
 if __name__ == "__main__":
